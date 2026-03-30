@@ -1,0 +1,37 @@
+# .github/workflows/owlmind-fix-issue.yml
+# Manually trigger to fix a specific GitHub issue
+
+name: Fix Issue with OwlMind
+on:
+  workflow_dispatch:
+    inputs:
+      issue-url:
+        description: 'GitHub issue URL to fix'
+        required: true
+        type: string
+
+jobs:
+  fix-issue:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: owlmind/fix-ci@v1
+        id: fix
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          owlmind-api-key: ${{ secrets.OWLMIND_API_KEY }}
+          issue-url: ${{ inputs.issue-url }}
+
+      - name: Report result
+        if: always()
+        run: |
+          echo "Status: ${{ steps.fix.outputs.status }}"
+          echo "PR: ${{ steps.fix.outputs.pr-url }}"
+          echo "Summary: ${{ steps.fix.outputs.summary }}"

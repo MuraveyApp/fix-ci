@@ -1,0 +1,152 @@
+name: 'OwlMind Fix CI'
+description: 'Automatically fix failed CI runs and create PRs with tested fixes'
+author: 'OwlMind'
+branding:
+  icon: 'tool'
+  color: 'purple'
+
+inputs:
+  github-token:
+    description: 'GitHub token for creating PRs'
+    required: true
+  owlmind-api-key:
+    description: 'OwlMind API key (get from owlmind.dev)'
+    required: true
+  issue-url:
+    description: 'GitHub issue URL to fix (optional — if not set, fixes the failed CI run)'
+    required: false
+    default: ''
+  max-attempts:
+    description: 'Maximum fix attempts'
+    required: false
+    default: '3'
+  base-branch:
+    description: 'Base branch to create PR against'
+    required: false
+    default: 'main'
+
+outputs:
+  pr-url:
+    description: 'URL of the created pull request'
+  status:
+    description: 'Result status: fixed, failed, skipped'
+  summary:
+    description: 'Human-readable summary of what was done'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install OwlMind
+      shell: bash
+      run: |
+        pip install owlmind-agent 2>/dev/null || pip install -e ${{ github.action_path }}/.. 2>/dev/null || true
+
+    - name: Get failure context
+      id: context
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        if [ -n "${{ inputs.issue-url }}" ]; then
+          echo "mode=issue" >> $GITHUB_OUTPUT
+          echo "target=${{ inputs.issue-url }}" >> $GITHUB_OUTPUT
+        else
+          # Get the failed workflow run log
+          RUN_ID=${{ github.event.workflow_run.id }}
+          if [ -z "$RUN_ID" ]; then
+            echo "mode=skip" >> $GITHUB_OUTPUT
+            echo "No workflow run ID found"
+            exit 0
+          fi
+
+          # Get failed jobs and their logs
+          FAILED_LOG=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs \
+            --jq '.jobs[] | select(.conclusion == "failure") | .name + ": " + (.steps[] | select(.conclusion == "failure") | .name)' \
+            2>/dev/null | head -10)
+
+          echo "mode=ci" >> $GITHUB_OUTPUT
+          echo "target=$FAILED_LOG" >> $GITHUB_OUTPUT
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run OwlMind
+      id: fix
+      if: steps.context.outputs.mode != 'skip'
+      shell: bash
+      env:
+        OWLMIND_API_KEY: ${{ inputs.owlmind-api-key }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        BRANCH="owlmind/fix-$(date +%s)"
+        git checkout -b "$BRANCH"
+
+        if [ "${{ steps.context.outputs.mode }}" = "issue" ]; then
+          GOAL="Fix this GitHub issue: ${{ steps.context.outputs.target }}"
+        else
+          GOAL="Fix this CI failure. Failed jobs: ${{ steps.context.outputs.target }}"
+        fi
+
+        # Run OwlMind auto
+        OWLMIND_SKIP_PASSWORD_CHECK=1 owlmind auto \
+          --goal "$GOAL" \
+          --workspace "$(pwd)" \
+          --auto-approve \
+          --use-llm both \
+          --use-worker claude_cli \
+          2>&1 | tee /tmp/owlmind_output.log
+
+        EXIT_CODE=$?
+
+        # Check if changes were made
+        if [ -n "$(git diff HEAD)" ]; then
+          git add -A
+          git commit -m "fix: auto-fix by OwlMind
+
+          Resolved automatically by OwlMind (https://owlmind.dev)
+          Run log: see PR comments for details"
+
+          git push origin "$BRANCH"
+
+          # Create PR
+          PR_URL=$(gh pr create \
+            --title "fix: Auto-fix by OwlMind" \
+            --body "## Automated Fix by OwlMind
+
+          This PR was created automatically by [OwlMind](https://owlmind.dev).
+
+          **Goal:** $GOAL
+
+          **Status:** Fix applied and ready for review.
+
+          ---
+          *OwlMind — autonomous issue-to-PR automation*" \
+            --base "${{ inputs.base-branch }}" \
+            --head "$BRANCH" 2>&1)
+
+          echo "pr-url=$PR_URL" >> $GITHUB_OUTPUT
+          echo "status=fixed" >> $GITHUB_OUTPUT
+          echo "summary=Fix applied. PR: $PR_URL" >> $GITHUB_OUTPUT
+        else
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "summary=No changes made. OwlMind could not find a fix." >> $GITHUB_OUTPUT
+        fi
+
+    - name: Comment result
+      if: steps.fix.outputs.status == 'fixed' && inputs.issue-url != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        ISSUE_NUM=$(echo "${{ inputs.issue-url }}" | grep -oP '\d+$')
+        REPO=$(echo "${{ inputs.issue-url }}" | grep -oP '[^/]+/[^/]+(?=/issues)')
+        if [ -n "$ISSUE_NUM" ] && [ -n "$REPO" ]; then
+          gh issue comment "$ISSUE_NUM" -R "$REPO" \
+            --body "OwlMind has automatically created a fix for this issue: ${{ steps.fix.outputs.pr-url }}
+
+          Please review the PR. Created by [OwlMind](https://owlmind.dev) — autonomous AI coding agent."
+        fi
