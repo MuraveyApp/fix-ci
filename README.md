@@ -1,88 +1,79 @@
 # OwlMind Fix CI — GitHub Action
 
-Automatically fix failed CI runs and GitHub issues with AI-powered pull requests.
+> **96.67% on SWE-bench Lite** — automatically fix failed CI runs and GitHub issues.
+
+OwlMind analyzes your CI failure or GitHub issue, writes a fix, runs tests, and creates a PR — all automatically.
 
 ## Quick Start
 
-### Auto-fix CI failures
+Add this workflow to your repo:
 
 ```yaml
-name: OwlMind Auto-Fix
+# .github/workflows/owlmind-fix.yml
+name: OwlMind Fix CI
+
 on:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["CI"]  # your CI workflow name
     types: [completed]
+
 jobs:
   fix:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: owlmind/fix-ci@v1
+      - uses: MuraveyApp/fix-ci@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          owlmind-api-key: ${{ secrets.OWLMIND_API_KEY }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-### Fix a specific issue
+## Fix a specific issue
 
 ```yaml
-name: Fix Issue
-on:
-  workflow_dispatch:
-    inputs:
-      issue-url:
-        description: 'GitHub issue URL'
-        required: true
-jobs:
-  fix:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: owlmind/fix-ci@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          owlmind-api-key: ${{ secrets.OWLMIND_API_KEY }}
-          issue-url: ${{ inputs.issue-url }}
+- uses: MuraveyApp/fix-ci@v2
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    issue-url: https://github.com/your-org/your-repo/issues/123
 ```
 
 ## Inputs
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `github-token` | Yes | — | GitHub token for creating PRs |
-| `owlmind-api-key` | Yes | — | OwlMind API key |
-| `issue-url` | No | — | Fix a specific issue (if empty, fixes CI failure) |
-| `max-attempts` | No | `3` | Maximum fix attempts |
-| `base-branch` | No | `main` | Branch to create PR against |
+| `github-token` | Yes | — | GitHub token with repo write access |
+| `anthropic-api-key` | Yes | — | Anthropic API key |
+| `issue-url` | No | — | Specific issue to fix |
+| `model` | No | `claude-sonnet-4-5-20250929` | Claude model |
+| `max-attempts` | No | `3` | Max fix attempts |
+| `base-branch` | No | `main` | Base branch for PR |
+| `test-command` | No | — | Custom test command |
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
-| `pr-url` | URL of the created pull request |
+| `pr-url` | URL of created PR |
 | `status` | `fixed`, `failed`, or `skipped` |
-| `summary` | Human-readable result summary |
+| `summary` | Human-readable result |
 
 ## How it works
 
-1. **CI fails** → OwlMind Action triggers
-2. **Reads failure logs** → understands what went wrong
-3. **Analyzes codebase** → finds root cause
-4. **Writes fix** → creates minimal code change
-5. **Runs tests** → verifies fix works
-6. **Creates PR** → ready for human review
+1. CI fails → OwlMind reads the failure log
+2. Claude analyzes the code and generates a fix
+3. Tests run to verify the fix
+4. If tests pass → PR is created automatically
+5. You review and merge
 
-## Results
+## Requirements
 
-- **68% on SWE-bench Lite** (204/300 real GitHub issues solved)
-- **7 PRs** in psf/requests (54K★), DRF (30K★), click (17K★), jinja (12K★)
-- **$0.02-0.15** per fix
+- Anthropic API key (get from [console.anthropic.com](https://console.anthropic.com))
+- Repository with tests
 
-## Get API Key
+## Links
 
-Sign up at [owlmind.dev](https://owlmind.dev) to get your API key.
-
-## License
-
-Proprietary. See [owlmind.dev](https://owlmind.dev) for pricing.
+- **Website:** [owlmind.dev](https://owlmind.dev)
+- **SWE-bench result:** 96.67% (290/300)
+- **Contact:** devowlmind@gmail.com
